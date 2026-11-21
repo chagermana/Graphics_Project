@@ -409,7 +409,8 @@ const Key mumKeys[] = {
     { 0.068f, -1.57f,  4.32f,   0.0f, false },
     { 0.100f, -4.0f,   2.9f, -125.0f, false },
     { 0.330f, -4.0f,   2.9f, -125.0f, false },   // watching with the kids
-    { 0.410f,  6.9f,   5.7f,  180.0f, false },   // to the table
+    { 0.358f, -3.2f,   6.8f,   90.0f, false },   // steps away from the door first
+    { 0.420f,  6.9f,   5.7f,  180.0f, false },   // then walks along the front to the table
     { 0.500f,  6.9f,   5.7f,  180.0f, false },   // waits, serving
     { 0.506f,  6.9f,   4.95f, 180.0f, false },   // sits
     { 0.625f,  6.9f,   4.95f, 180.0f, false },
@@ -1568,6 +1569,13 @@ void drawPerson(float x, float z, float yaw, float scale,
         box(0.0f, -0.35f, 0.0f, 0.16f, 0.7f, 0.16f);
         color3(skin[0], skin[1], skin[2]);
         box(0.0f, -0.74f, 0.0f, 0.14f, 0.14f, 0.14f);
+
+        // shopping bag hangs from the hand, so it moves with the arm
+        if (bags) {
+            if (side == 1) color3(0.85f, 0.65f, 0.25f);
+            else           color3(0.30f, 0.60f, 0.85f);
+            box(0.0f, -0.97f, 0.0f, 0.16f, 0.36f, 0.24f);
+        }
         glPopMatrix();
     }
 
@@ -1584,13 +1592,6 @@ void drawPerson(float x, float z, float yaw, float scale,
         box(0.0f, 1.80f, 0.205f, 0.14f, 0.03f, 0.02f);     // smile
     }
 
-    // shopping bags
-    if (bags) {
-        color3(0.85f, 0.65f, 0.25f);
-        box( 0.52f, 0.75f, 0.10f, 0.30f, 0.40f, 0.22f);
-        color3(0.30f, 0.60f, 0.85f);
-        box(-0.52f, 0.75f, 0.10f, 0.30f, 0.40f, 0.22f);
-    }
     glPopMatrix();
 }
 
