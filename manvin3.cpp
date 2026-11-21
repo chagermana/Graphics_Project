@@ -491,7 +491,10 @@ PersonState evalPerson(const Key* k, int n)
 // Everything the story decides for the current time
 struct Story {
     bool  carOn;   float carX;                  // the car
-    bool  elephOn; float eleX;                  // lead elephant x
+        bool  elephOn; float eleX;                  // cows visible / lead cow x
+    float cowLie;                               // 0 = standing, 1 = lying asleep
+    float cowZzz;                               // strength of the cows' "zzz"
+                    // lead elephant x
     PersonState p[4];                           // 0 dad, 1 mum, 2 kid1, 3 kid2
     bool  grillOn;                              // barbecue is lit
     float lightA, lightB, lightBed;             // window lights (0 or 1, smooth)
@@ -530,15 +533,71 @@ bool carPosition(float t, float& x)
     x = CAR_PARK_X;                                                  // parked
     return true;
 }
+// ---- the cows: 3 of them (mum, calf, dad) walk into the cowshed ----
+const int   NUM_COWS      = 3;
+const float COW_START[3]  = { -40.0f, -46.0f, -52.0f };  // where each cow enters (x)
+const float COW_END[3]    = {  27.0f,  24.2f,  21.4f };  // where each cow stands in the shed
+const float COW_Z[3]      = {  -8.0f,  -7.0f,  -8.9f };
+const float COW_SCALE[3]  = {  0.95f,  0.65f,  0.90f };  // the middle one is a calf
+const float COW_ARRIVE_T  = 0.29f;                       // time they reach the shed
+
+
+
+// Day plan: asleep in the shed -> wake up -> walk out to the field (left)
+//           -> away all day -> walk home -> turn to the camera -> sleep
+const float COW_OUT_T  = 0.09f;   // first cow starts walking out (the others follow, +0.01 each)
+const float COW_OUT_D  = 0.20f;   // how long the walk out takes
+const float COW_BACK_T = 0.48f;   // first cow starts walking home (early evening)
+const float COW_BACK_D = 0.14f;   // how long the walk home takes
+float smoothStep01(float a, float b, float t);
+
+float cowXAt(int i, float t)
+{
+    float outStart  = COW_OUT_T  + i * 0.01f;
+    float backStart = COW_BACK_T + i * 0.01f;
+    if (t < outStart)                                  // in the shed
+        return COW_END[i];
+    if (t < backStart)                                 // walking out, then away in the field
+        return lerpf(COW_END[i], COW_START[i], clamp01((t - outStart) / COW_OUT_D));
+    return lerpf(COW_START[i], COW_END[i],             // walking home, then in the shed
+                 clamp01((t - backStart) / COW_BACK_D));
+}
+
+bool cowMoving(int i, float t)
+{
+    float outStart  = COW_OUT_T  + i * 0.01f;
+    float backStart = COW_BACK_T + i * 0.01f;
+    return (t > outStart  && t < outStart  + COW_OUT_D) ||
+           (t > backStart && t < backStart + COW_BACK_D);
+}
+
+// 0 = facing +x, -90 = facing the camera, -180 = facing -x
+float cowYaw(int i, float t)
+{
+    float outStart  = COW_OUT_T  + i * 0.01f;
+    float backEnd   = COW_BACK_T + i * 0.01f + COW_BACK_D;
+    if (t < 0.40f)                                     // morning: face camera, turn left, walk out
+        return -90.0f - 90.0f * smoothStep01(outStart - 0.02f, outStart, t);
+    return -90.0f * smoothStep01(backEnd, backEnd + 0.03f, t);   // evening: walk in, turn to camera
+}
 
 void updateStory()
 {
     float t = timeOfDay;
     story.carOn = carPosition(t, story.carX);
 
-    story.eleX    = lerpf(-40.0f, 50.0f, clamp01((t - 0.09f) / 0.20f));
-    story.elephOn = (t > 0.09f && t < 0.29f);
 
+    story.eleX    = cowXAt(0, t);
+
+    // visible while in the shed or walking; hidden while out in the field
+    story.elephOn = (t < 0.32f || t > 0.47f);
+    // asleep at night, stand up at dawn; lie down again after coming home
+    story.cowLie  = (t < 0.40f) ? 1.0f - smoothStep01(0.04f, 0.07f, t)
+                                : smoothStep01(0.68f, 0.71f, t);
+    // "zzz" while asleep (same value at t = 1 and t = 0, so the loop is seamless)
+    story.cowZzz  = (t < 0.40f) ? 1.0f - smoothStep01(0.03f, 0.05f, t)
+                                : smoothStep01(0.72f, 0.75f, t);
+    
     story.p[0] = evalPerson(dadKeys,  (int)(sizeof(dadKeys)  / sizeof(Key)));
     story.p[1] = evalPerson(mumKeys,  (int)(sizeof(mumKeys)  / sizeof(Key)));
     story.p[2] = evalPerson(kid1Keys, (int)(sizeof(kid1Keys) / sizeof(Key)));
@@ -575,13 +634,13 @@ const char* eventText()
     float t = timeOfDay;
     if (t < 0.03f)  return "Before dawn - the family is asleep";
     if (t < 0.09f)  return "Sunrise - birds fly past, dad drives to the shops";
-    if (t < 0.29f)  return "Morning - an elephant family walks by, the kids cheer";
+    if (t < 0.29f)  return "Morning - the cows head out to the field, the kids cheer";
     if (t < 0.345f) return "Midday - the car comes back with the shopping";
     if (t < 0.42f)  return "Dad is home - the kids run to greet him";
     if (t < 0.52f)  return "Afternoon - dad cooks on the barbecue";
-    if (t < 0.625f) return "Sunset - dinner outside";
+    if (t < 0.625f) return "Sunset - dinner outside, the cows come home to the shed";
     if (t < 0.74f)  return "Everyone goes inside";
-    if (t < 0.87f)  return "Night - the lights go off one by one";
+    if (t < 0.87f)  return "Night - the lights go off, one by one";
     if (t < 0.97f)  return "Goodnight...  zzz";
     return "Night";
 }
@@ -1075,6 +1134,8 @@ float frand() { return (float)rand() / (float)RAND_MAX; }
 // path to the door or on the road (all in the house's rotated frame).
 bool grassAllowed(float x, float z)
 {
+    if (x > 18.5f && x < 33.0f && z > -12.0f && z < -4.0f) return false;   // cowshed
+
     float a  = HOUSE_ROT * DEG;
     float lx = x * cosf(a) - z * sinf(a);
     float lz = x * sinf(a) + z * cosf(a);
@@ -1187,6 +1248,12 @@ bool grassInShadow(float x, float z)
         { 0, 3.5f, 2.3f, 20.3f }, { 0, 3.5f, -2.3f, 20.3f } };
     if (rayHitConvex(lp, ld, body, 6)) return true;
     if (rayHitConvex(lp, ld, roof, 5))  return true;
+
+        // cowshed roof (world coordinates, so use p and d)
+    static const float shedRoof[6][4] = {
+        { 1, 0, 0, 31.5f }, { -1, 0, 0, -19.5f }, { 0, 1, 0, 5.0f },
+        { 0, -1, 0, -3.4f }, { 0, 0, 1, -4.9f }, { 0, 0, -1, 11.1f } };
+    if (rayHitConvex(p, d, shedRoof, 6)) return true;
 
     // trees: the three flat canopy blobs of drawTree()
     static const float blob[3][6] = {
@@ -1329,63 +1396,132 @@ void drawProps()
     }
 }
 
-// ---- A blocky elephant. It faces +x. Everything is a box rotated about a pivot. ----
-void drawElephant(float x, float z, float scale)
+// ---- A blocky cow. It faces +x. lie = 0 standing ... 1 lying down asleep ----
+// ---- A blocky cow. It faces +x. lie = 0 standing ... 1 lying down asleep ----
+void drawCow(float x, float z, float scale, float walkPhase,
+             float swingAmt, float lie, int variant, float yaw)
 {
-    float walkPhase = x * 1.4f;                          // legs follow the distance walked
-    float flapPhase = timeOfDay * 900.0f + x * 0.3f;     // ears flap with time
-    float swing = 22.0f * sinf(walkPhase);
-    float earAngle = 15.0f + 20.0f * (0.5f + 0.5f * sinf(flapPhase));
+    const float white[3]  = { 0.95f, 0.94f, 0.90f };
+    const float blackP[3] = { 0.10f, 0.10f, 0.11f };
+    const float brownP[3] = { 0.45f, 0.25f, 0.12f };
+    const float* patch = (variant == 1) ? brownP : blackP;
+    const float patchX[3][2] = { { -0.45f, 0.65f }, { 0.10f, -0.70f }, { -0.10f, 0.75f } };
+    int   v = variant % 3;
+
+    float swing     = 20.0f * sinf(walkPhase) * swingAmt;
+    float tailSwish = 15.0f * sinf(timeOfDay * 600.0f + variant * 2.0f);
+    float bodyY = lerpf(1.35f, 0.55f, lie);       // body sinks when lying down
+    float hipY  = bodyY - 0.45f;
+    float headY = lerpf(1.60f, 0.70f, lie);       // head rests low when asleep
 
     glPushMatrix();
     glTranslatef(x, 0.0f, z);
+    glRotatef(yaw, 0.0f, 1.0f, 0.0f);        // 0 = facing +x, -90 = facing the camera
     glScalef(scale, scale, scale);
 
-    // legs: pivot at the hip, diagonal pairs swing together
-    color3(0.48f, 0.49f, 0.53f);
-    for (int i = 0; i < 4; i++) {
-        float lx = (i < 2) ? 1.0f : -1.0f;               // front / rear
-        float lz = (i % 2 == 0) ? 0.5f : -0.5f;          // left / right
-        float a  = ((i == 0 || i == 3) ? swing : -swing);
-        glPushMatrix();
-        glTranslatef(lx, 1.3f, lz);
-        glRotatef(a, 0.0f, 0.0f, 1.0f);
-        box(0.0f, -0.65f, 0.0f, 0.5f, 1.3f, 0.5f);
-        glPopMatrix();
+    // legs: pivot at the hip, diagonal pairs swing together (same idea as before)
+    if (lie < 0.5f) {
+        for (int i = 0; i < 4; i++) {
+            float lx = (i < 2) ? 0.75f : -0.75f;
+            float lz = (i % 2 == 0) ? 0.3f : -0.3f;
+            float a  = ((i == 0 || i == 3) ? swing : -swing);
+            glPushMatrix();
+            glTranslatef(lx, hipY, lz);
+            glRotatef(a, 0.0f, 0.0f, 1.0f);
+            color3(white[0], white[1], white[2]);
+            box(0.0f, -hipY * 0.5f, 0.0f, 0.22f, hipY, 0.22f);
+            color3(0.15f, 0.12f, 0.10f);                      // hoof
+            box(0.0f, -hipY + 0.06f, 0.0f, 0.25f, 0.12f, 0.25f);
+            glPopMatrix();
+        }
+    } else {
+        // lying: legs folded under the body
+        color3(white[0], white[1], white[2]);
+        box( 0.9f, 0.12f,  0.40f, 0.55f, 0.20f, 0.20f);
+        box( 0.9f, 0.12f, -0.40f, 0.55f, 0.20f, 0.20f);
+        box(-0.7f, 0.12f,  0.45f, 0.50f, 0.22f, 0.22f);
+        box(-0.7f, 0.12f, -0.45f, 0.50f, 0.22f, 0.22f);
     }
 
-    // body and head
-    color3(0.55f, 0.56f, 0.60f);
-    box(0.0f, 2.1f, 0.0f, 3.0f, 1.7f, 1.5f);
-    box(1.9f, 2.4f, 0.0f, 1.2f, 1.3f, 1.3f);
+    // body + two patches
+    color3(white[0], white[1], white[2]);
+    box(0.0f, bodyY, 0.0f, 2.2f, 1.0f, 0.9f);
+    color3(patch[0], patch[1], patch[2]);
+    box(patchX[v][0], bodyY + 0.12f, 0.0f, 0.6f, 0.8f, 0.94f);
+    box(patchX[v][1], bodyY + 0.20f, 0.0f, 0.4f, 0.7f, 0.94f);
 
-    // trunk (swings gently about the head)
+    // udder
+    color3(0.95f, 0.70f, 0.70f);
+    box(-0.55f, bodyY - 0.50f, 0.0f, 0.4f, 0.2f, 0.35f);
+
+    // neck, head, snout, horns, ears, eyes
+    float neckTop = bodyY + 0.25f;
+    color3(white[0], white[1], white[2]);
+    box(1.25f, (neckTop + headY) * 0.5f, 0.0f, 0.55f, fabsf(neckTop - headY) + 0.5f, 0.55f);
+    box(1.55f, headY, 0.0f, 0.60f, 0.55f, 0.55f);
+    color3(0.95f, 0.70f, 0.70f);
+    box(1.90f, headY - 0.10f, 0.0f, 0.25f, 0.30f, 0.45f);
+    color3(0.90f, 0.85f, 0.70f);
+    box(1.45f, headY + 0.35f,  0.20f, 0.08f, 0.18f, 0.08f);
+    box(1.45f, headY + 0.35f, -0.20f, 0.08f, 0.18f, 0.08f);
+    color3(patch[0], patch[1], patch[2]);
+    box(1.40f, headY + 0.20f,  0.38f, 0.20f, 0.10f, 0.25f);
+    box(1.40f, headY + 0.20f, -0.38f, 0.20f, 0.10f, 0.25f);
+    if (!shadowPass) {
+        color3(0.05f, 0.05f, 0.05f);
+        if (lie < 0.7f) {                                      // eyes open
+            box(1.72f, headY + 0.12f,  0.28f, 0.06f, 0.08f, 0.04f);
+            box(1.72f, headY + 0.12f, -0.28f, 0.06f, 0.08f, 0.04f);
+        } else {                                               // eyes closed (thin lines)
+            box(1.72f, headY + 0.12f,  0.28f, 0.08f, 0.015f, 0.04f);
+            box(1.72f, headY + 0.12f, -0.28f, 0.08f, 0.015f, 0.04f);
+        }
+    }
+
+    // tail swishes about its pivot
     glPushMatrix();
-    glTranslatef(2.55f, 2.1f, 0.0f);
-    glRotatef(10.0f * sinf(walkPhase + 1.0f), 0.0f, 0.0f, 1.0f);
-    box(0.0f, -0.75f, 0.0f, 0.4f, 1.5f, 0.4f);
+    glTranslatef(-1.1f, bodyY + 0.3f, 0.0f);
+    glRotatef(tailSwish, 1.0f, 0.0f, 0.0f);
+    color3(white[0], white[1], white[2]);
+    box(0.0f, -0.45f, 0.0f, 0.10f, 0.90f, 0.10f);
+    color3(patch[0], patch[1], patch[2]);
+    box(0.0f, -0.95f, 0.0f, 0.14f, 0.20f, 0.14f);
     glPopMatrix();
 
-    // tusks, eyes, tail
-    color3(0.95f, 0.93f, 0.82f);
-    box(2.6f, 1.9f,  0.45f, 0.7f, 0.12f, 0.12f);
-    box(2.6f, 1.9f, -0.45f, 0.7f, 0.12f, 0.12f);
-    color3(0.05f, 0.05f, 0.05f);
-    box(2.52f, 2.65f,  0.35f, 0.06f, 0.12f, 0.12f);
-    box(2.52f, 2.65f, -0.35f, 0.06f, 0.12f, 0.12f);
-    color3(0.45f, 0.46f, 0.50f);
-    box(-1.55f, 1.9f, 0.0f, 0.15f, 0.9f, 0.15f);
-
-    // ears: flat boxes hinged at the head, they swing outwards and back
-    color3(0.62f, 0.55f, 0.58f);
-    for (int side = -1; side <= 1; side += 2) {
-        glPushMatrix();
-        glTranslatef(1.55f, 2.7f, 0.7f * side);
-        glRotatef(earAngle * side, 0.0f, 1.0f, 0.0f);
-        box(-0.5f, -0.55f, 0.0f, 1.0f, 1.2f, 0.12f);
-        glPopMatrix();
-    }
     glPopMatrix();
+}
+
+// ---- Cowshed: open front and open left side (so cows can walk in), seen from the camera ----
+void drawCowshed()
+{
+    const float cx = 25.5f, cz = -8.0f;
+
+    // straw floor
+    color3(0.80f, 0.70f, 0.40f);
+    box(cx, 0.03f, cz, 11.0f, 0.06f, 5.4f);
+
+    // back wall + right wall
+    color3(0.62f, 0.22f, 0.16f);
+    box(cx, 1.75f, -10.5f, 11.0f, 3.5f, 0.25f);
+    box(30.9f, 1.75f, cz, 0.25f, 3.5f, 5.0f);
+
+    // posts along the front
+    color3(0.40f, 0.28f, 0.16f);
+    box(20.0f, 2.35f, -5.5f, 0.3f, 4.7f, 0.3f);
+    box(25.5f, 2.35f, -5.5f, 0.3f, 4.7f, 0.3f);
+    box(31.0f, 2.35f, -5.5f, 0.3f, 4.7f, 0.3f);
+
+    // sloping roof (front edge higher than the back)
+    glPushMatrix();
+    glTranslatef(cx, 4.2f, cz);
+    glRotatef(-12.0f, 1.0f, 0.0f, 0.0f);
+    color3(0.45f, 0.30f, 0.25f);
+    box(0.0f, 0.0f, 0.0f, 12.0f, 0.25f, 6.2f);
+    glPopMatrix();
+
+    // hay bale in the corner
+    color3(0.85f, 0.75f, 0.35f);
+    box(30.0f, 0.45f, -9.6f, 1.2f, 0.9f, 1.0f);
 }
 
 // ---- A blocky person. It faces +z, then yaw turns it. ----
@@ -1562,11 +1698,17 @@ void drawCasters()
 
     if (story.carOn) drawCar(story.carX);
 
+        drawCowshed();
+
     if (story.elephOn) {
-        float x0 = story.eleX;
-        drawElephant(x0,          ELE_Z,        1.6f);   // dad
-        drawElephant(x0 - 6.5f,   ELE_Z + 0.6f, 0.7f);   // baby
-        drawElephant(x0 - 12.5f,  ELE_Z,        1.4f);   // mum
+    
+                for (int i = 0; i < NUM_COWS; i++) {
+            float t   = timeOfDay;
+            float cx2 = cowXAt(i, t);
+            drawCow(cx2, COW_Z[i], COW_SCALE[i], cx2 * 1.8f,
+                    cowMoving(i, t) ? 1.0f : 0.0f, story.cowLie, i, cowYaw(i, t));
+        }
+
     }
 
     drawPeople();
@@ -1604,9 +1746,11 @@ void drawGround()
                 h = (h ^ (h >> 13)) * 1274126177u;
                 h ^= (h >> 16);
                 float t = (float)(h & 0xFFFF) / 65535.0f;
-                float c[3];
-                mix3(c, dark, light, t);
-                glColor3f(c[0], c[1], c[2]);
+                // float c[3];
+                // mix3(c, dark, light, t);
+                // glColor3f(c[0], c[1], c[2]);
+                // 
+                glColor3f(0.27f, 0.65f, 0.22f);
                 glVertex3f(g[ci[k]], 0.0f, g[cj[k]]);
             }
         }
@@ -1774,7 +1918,7 @@ void drawShadows()
     glMultMatrixf(m);                        // flatten everything onto the ground
     shadowPass = true;
     drawCasters();
-    drawGrassArrays(false);                  // every blade casts its own thin shadow
+    //drawGrassArrays(false);                  // every blade casts its own thin shadow
     shadowPass = false;
     glPopMatrix();
 
@@ -1812,28 +1956,24 @@ void draw3D()
     drawGround();
     drawRoad();
     drawPath();
-    updateGrassShadows();                    // which tufts are in the house / tree shadows
-    buildGrass();                            // blade triangles (wind + shading) for this frame
     if (showShadows && s.shadowAlpha > 0.01f) drawShadows();
     drawCasters();
-    drawGrassArrays(true);                   // the lit blades
     drawSmoke();
-
     glDisable(GL_LIGHTING);
     glDisable(GL_FOG);
 }
 
 // "Z z Z" floating up from the bedroom window (2D text at the window's screen position)
-void drawZzz(float zx, float zy)
+void drawZzz(float zx, float zy, float strength, float phase)
 {
-    if (story.zzz < 0.01f) return;
+    if (strength < 0.01f) return;
     begin2D();
     for (int k = 0; k < 3; k++) {
-        float u  = fmodf(timeOfDay * 14.0f + k / 3.0f, 1.0f);   // age of this letter
+        float u  = fmodf(timeOfDay * 14.0f + phase + k / 3.0f, 1.0f);
         float px = zx + 8.0f + u * 55.0f;
         float py = zy + 10.0f + u * 95.0f;
-        float a  = sinf(PI * u) * story.zzz;
-        void* font = GLUT_BITMAP_HELVETICA_12;                  // gets bigger as it rises
+        float a  = sinf(PI * u) * strength;
+        void* font = GLUT_BITMAP_HELVETICA_12;
         char  ch   = 'z';
         if (u > 0.66f)      { font = GLUT_BITMAP_TIMES_ROMAN_24; ch = 'Z'; }
         else if (u > 0.33f) { font = GLUT_BITMAP_HELVETICA_18;   ch = 'Z'; }
@@ -2012,7 +2152,19 @@ void display()
     drawBackground(hy, sunVisible, (float)sxw, (float)syw,
                    moonVisible, (float)mxw, (float)myw, bgShift);
     draw3D();
-    drawZzz((float)zxw, (float)zyw);
+        drawZzz((float)zxw, (float)zyw, story.zzz, 0.0f);          // the family's bedroom
+
+            for (int i = 0; i < NUM_COWS; i++) {                        // the sleeping cows
+        GLdouble cxw = 0.0, cyw = 0.0, czw = 0.0;
+        gluProject(COW_END[i], 1.3, COW_Z[i] + 1.4, mv, pr, vp, &cxw, &cyw, &czw);
+        drawZzz((float)cxw, (float)cyw, story.cowZzz, i * 0.31f);
+    }
+
+        for (int i = 0; i < NUM_COWS; i++) {                        // the sleeping cows
+        GLdouble cxw = 0.0, cyw = 0.0, czw = 0.0;
+        gluProject(COW_END[i], 1.3, COW_Z[i] + 1.4, mv, pr, vp, &cxw, &cyw, &czw);
+        drawZzz((float)cxw, (float)cyw, story.cowZzz, i * 0.31f);
+    }
     drawHUD();
 
     glutSwapBuffers();
@@ -2110,7 +2262,7 @@ int main(int argc, char** argv)
     glEnable(GL_DEPTH_TEST);
     glShadeModel(GL_SMOOTH);
     initStars();
-    initGrass();
+    //initGrass();
 
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
