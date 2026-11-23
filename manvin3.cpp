@@ -1687,6 +1687,123 @@ void drawPeople()
     }
 }
 
+// ---- One straight run of fence between two points (in the road's slanted frame) ----
+void fenceRun(float ax, float az, float bx, float bz)
+{
+    const float POST_GAP = 1.5f;
+    float dx = bx - ax, dz = bz - az;
+    float len = sqrtf(dx * dx + dz * dz);
+    int   n = (int)ceilf(len / POST_GAP);
+
+    // posts
+    color3(0.50f, 0.36f, 0.20f);
+    for (int i = 0; i <= n; i++) {
+        float u = (float)i / (float)n;
+        box(ax + dx * u, 0.5f, az + dz * u, 0.12f, 1.0f, 0.12f);
+    }
+
+    // two rails: one box each, rotated to follow the run
+    glPushMatrix();
+    glTranslatef((ax + bx) * 0.5f, 0.0f, (az + bz) * 0.5f);
+    glRotatef(atan2f(-dz, dx) / DEG, 0.0f, 1.0f, 0.0f);
+    box(0.0f, 0.35f, 0.0f, len, 0.08f, 0.06f);
+    box(0.0f, 0.75f, 0.0f, len, 0.08f, 0.06f);
+    glPopMatrix();
+}
+
+// ---- Fenced farm plot: dark soil with furrows, a gate gap and a few crop sprouts ----
+void drawFarmCompound()
+{
+    const float X0 = -8.0f, X1 = 8.0f;                 // left / right edge
+    const float Z0 = CAR_Z + 8.0f, Z1 = CAR_Z + 12.0f; // front (road side) / back edge
+    const float GATE = 1.4f;                           // half width of the gate opening
+
+    glPushMatrix();
+    glRotatef(ROAD_ROT, 0.0f, 1.0f, 0.0f);             // same slant as the road
+
+    if (!shadowPass) {
+        // dark soil base
+        glColor3f(0.20f, 0.13f, 0.08f);
+        glBegin(GL_QUADS);
+        glNormal3f(0.0f, 1.0f, 0.0f);
+        glVertex3f(X0, 0.014f, Z0); glVertex3f(X1, 0.014f, Z0);
+        glVertex3f(X1, 0.014f, Z1); glVertex3f(X0, 0.014f, Z1);
+        glEnd();
+
+        // furrows: slightly lighter strips running left-right, like ploughed rows
+        glColor3f(0.30f, 0.20f, 0.12f);
+        glBegin(GL_QUADS);
+        glNormal3f(0.0f, 1.0f, 0.0f);
+        for (float z = Z0 + 1.2f; z < Z1 - 0.8f; z += 1.0f) {
+            glVertex3f(X0 + 0.6f, 0.016f, z);        glVertex3f(X1 - 0.6f, 0.016f, z);
+            glVertex3f(X1 - 0.6f, 0.016f, z + 0.45f); glVertex3f(X0 + 0.6f, 0.016f, z + 0.45f);
+        }
+        glEnd();
+    }
+
+    // little green crop sprouts along the furrows (small boxes, so they cast tiny shadows)
+    color3(0.30f, 0.62f, 0.22f);
+    for (float z = Z0 + 1.4f; z < Z1 - 1.0f; z += 1.0f)
+        for (float x = X0 + 1.0f; x < X1 - 0.8f; x += 1.2f)
+            box(x, 0.12f, z, 0.16f, 0.24f, 0.16f);
+
+    // fence: front is split to leave the gate opening
+    fenceRun(X0, Z0, -GATE, Z0);
+    fenceRun(GATE, Z0, X1, Z0);
+    fenceRun(X1, Z0, X1, Z1);
+    fenceRun(X1, Z1, X0, Z1);
+    fenceRun(X0, Z1, X0, Z0);
+
+    // taller gate posts
+    color3(0.35f, 0.25f, 0.14f);
+    box(-GATE, 0.8f, Z0, 0.2f, 1.6f, 0.2f);
+    box(GATE, 0.8f, Z0, 0.2f, 1.6f, 0.2f);
+
+    glPopMatrix();
+}
+
+// ---- A small farm windmill: slim tower, tail vane, multi-bladed wheel turning at constant speed ----
+void drawWindmill(float lx, float lz, float s, float phase)
+{
+    const float H = 5.0f;                       // tower height (before scaling)
+
+    glPushMatrix();
+    glRotatef(ROAD_ROT, 0.0f, 1.0f, 0.0f);
+    glTranslatef(lx, 0.0f, lz);
+    glScalef(s, s, s);
+
+    // base and tower
+    color3(0.45f, 0.45f, 0.48f);
+    box(0.0f, 0.2f, 0.0f, 0.9f, 0.4f, 0.9f);
+    color3(0.60f, 0.42f, 0.25f);
+    box(0.0f, H * 0.5f, 0.0f, 0.35f, H, 0.35f);
+
+    // head and tail vane
+    color3(0.50f, 0.50f, 0.54f);
+    box(0.0f, H + 0.15f, 0.1f, 0.4f, 0.4f, 0.9f);
+    color3(0.75f, 0.20f, 0.18f);
+    box(0.0f, H + 0.25f, -1.2f, 0.05f, 0.7f, 1.3f);
+
+    // wheel: pivot at the front of the head, spins about z
+    glPushMatrix();
+    glTranslatef(0.0f, H + 0.15f, 0.65f);
+    glRotatef(phase + windTime * 90.0f, 0.0f, 0.0f, 1.0f);   // 90 deg/sec, constant
+
+    color3(0.30f, 0.30f, 0.32f);
+    glutSolidSphere(0.15, 10, 8);
+
+    color3(0.90f, 0.90f, 0.92f);
+    for (int i = 0; i < 12; i++) {
+        glPushMatrix();
+        glRotatef(i * 30.0f, 0.0f, 0.0f, 1.0f);
+        box(0.0f, 0.95f, 0.0f, 0.28f, 1.3f, 0.04f);
+        glPopMatrix();
+    }
+    glPopMatrix();   // end wheel
+
+    glPopMatrix();
+}
+
 // Everything that casts a shadow
 void drawCasters()
 {
@@ -1698,6 +1815,9 @@ void drawCasters()
     drawProps();
 
     if (story.carOn) drawCar(story.carX);
+
+    drawFarmCompound();                               // fenced farm plot
+    drawWindmill(4.0f, CAR_Z + 10.0f, 1.0f, 0.0f);     // single windmill inside it
 
         drawCowshed();
 
